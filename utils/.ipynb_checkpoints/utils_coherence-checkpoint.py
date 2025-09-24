@@ -70,7 +70,7 @@ def extract_baseline_coherence_between_ECOG_LFP_channels():
                         # f, Cxy = measure_absolute_coherence(ECOG_recording, LFP_recording)
 
                         ##############################################################################################
-                        # get 1-second segments of the baseline recordings and get the average coherence
+                        # get 2-second segments of the baseline recordings and get the average coherence
                         segment_length          = (fs*2)
                         segment_overlap         = segment_length / 2
                         
