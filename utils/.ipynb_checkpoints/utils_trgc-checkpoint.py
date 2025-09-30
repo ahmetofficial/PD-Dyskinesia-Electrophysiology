@@ -7,6 +7,7 @@ from scipy import signal
 import numpy as np
 import sys
 import pickle
+import statsmodels.formula.api as smf
 
 import mne
 from mne_connectivity import spectral_connectivity_epochs
@@ -538,3 +539,143 @@ def normalize_gc_by_baseline(taps_gc, baseline_gc):
     norm_gc = norm_gc.drop(columns=["gc_gamma_III"])
     
     return norm_gc
+
+def compare_trgc_strength_across_states(dataset, direction, frequency_band, segment):
+
+    results     = []
+    data        = dataset[(dataset.segment==segment) & (dataset.direction==direction)].copy()
+
+    # model 1: MED-OFF vs MED-ON
+    d1          = data.copy()
+    d1["state"] = pd.Categorical(d1["state"], categories=["MED-OFF", "MED-ON", "LID"], ordered=False) # MED-OFF baseline state
+    model1      = smf.mixedlm(f"gc_{frequency_band} ~ C(state)", d1, groups=d1["patient"], vc_formula={"channel": "0 + C(source_channel)"})
+    res1        = model1.fit()
+    coef        = res1.params["C(state)[T.MED-ON]"]
+    se          = res1.bse["C(state)[T.MED-ON]"]
+    pval        = res1.pvalues["C(state)[T.MED-ON]"]
+    z_score     = coef / se
+    ci_low      = coef - 1.96 * se
+    ci_high     = coef + 1.96 * se
+
+    results.append({"reference_group": "MED-OFF", "comparison_group": "MED-ON", "direction":direction, "segment":segment, "frequency_band":frequency_band,
+                    "coefficient": coef, "z_score": z_score, "pvalue": pval, "CI_lower": ci_low, "CI_upper": ci_high})
+
+    # model 2: MED-ON vs LID
+    d2          = data.copy()
+    d2["state"] = pd.Categorical(d2["state"], categories=["MED-ON", "MED-OFF", "LID"], ordered=False)
+    model2      = smf.mixedlm(f"gc_{frequency_band} ~ C(state)", d2, groups=d2["patient"], vc_formula={"channel": "0 + C(source_channel)"})
+    res2        = model2.fit()
+    coef        = res2.params["C(state)[T.LID]"]
+    se          = res2.bse["C(state)[T.LID]"]
+    z_score     = coef / se
+    ci_low      = coef - 1.96 * se
+    ci_high     = coef + 1.96 * se
+    pval        = res2.pvalues["C(state)[T.LID]"]
+    results.append({"reference_group": "MED-ON", "comparison_group": "LID", "direction":direction, "segment":segment, "frequency_band":frequency_band,
+                    "coefficient": coef, "z_score": z_score, "pvalue": pval, "CI_lower": ci_low, "CI_upper": ci_high})
+
+    return pd.DataFrame(results)
+
+
+def compare_trgc_strength_across_segments_within_states(dataset, state, frequency_band, direction="ecog->lfp"):
+    
+    results           = []
+    
+    # prepare the data
+    subset            = dataset[(dataset["state"] == state) & (dataset["frequency_band"] == frequency_band)]
+    subset["segment"] = pd.Categorical(subset["segment"], categories=["event", "pre_event", "post_event"], ordered=False) # "event" is the baseline
+    
+    # fit the model
+    model             = smf.mixedlm("gc_value ~ C(segment)", groups="patient", vc_formula={"source_channel": "0 + C(source_channel)"}, data=subset)
+    model_result      = model.fit()
+    
+    pre               = "C(segment)[T.pre_event]"
+    coef_pre          = model_result.params[pre]
+    se_pre            = model_result.bse[pre]
+    pval_pre          = model_result.pvalues[pre]
+    z_score_pre       = coef_pre / se_pre
+    ci_low_pre        = coef_pre - 1.96 * se_pre
+    ci_high_pre       = coef_pre + 1.96 * se_pre
+    
+    post              = "C(segment)[T.post_event]"
+    coef_post         = model_result.params[post]
+    se_post           = model_result.bse[post]
+    pval_post         = model_result.pvalues[post]
+    z_score_post      = coef_post / se_post
+    ci_low_post       = coef_post - 1.96 * se_post
+    ci_high_post      = coef_post + 1.96 * se_post
+    
+    results.append({"reference_group": "event", "comparison_group": "pre_event" , "direction":direction, "state":state, "frequency_band":frequency_band,
+                    "coefficient": coef_pre, "z_score": z_score_pre, "pvalue": pval_pre, "CI_lower": ci_low_pre, "CI_upper": ci_high_pre})
+    
+    results.append({"reference_group": "event", "comparison_group": "post_event", "direction":direction, "state":state, "frequency_band":frequency_band,
+                    "coefficient": coef_post, "z_score": z_score_post, "pvalue": pval_post, "CI_lower": ci_low_post, "CI_upper": ci_high_post})
+    return results
+
+def compare_trgc_strength_across_segments_within_cortical_areas(dataset, state, segment, frequency_band):
+    
+    # convert to categorical with 'motor' as baseline
+    data                   = dataset[(dataset.state==state) & (dataset.segment==segment)].copy()
+    ordered_cortices       = ["motor"] + [c for c in data["AAL3_cortex"].unique().tolist() if c != "motor"]
+    data["AAL3_cortex"]    = pd.Categorical(data["AAL3_cortex"], categories=ordered_cortices, ordered=False)
+
+    model                  = smf.mixedlm(f"gc_{frequency_band} ~ C(AAL3_cortex)", data, groups=data["patient"], vc_formula={"channel": "0 + C(source_channel)"})
+    model_result           = model.fit()
+
+    cor_sensory            = "C(AAL3_cortex)[T.sensory]"
+    cor_parietal           = "C(AAL3_cortex)[T.parietal]"
+    cor_prefrontal         = "C(AAL3_cortex)[T.prefrontal]"
+    results                = []
+    
+    try:
+        coef_sensory       = model_result.params[cor_sensory]
+        se_sensory         = model_result.bse[cor_sensory]
+        pval_sensory       = model_result.pvalues[cor_sensory]
+        z_score_sensory    = coef_sensory / se_sensory
+        ci_low_sensory     = coef_sensory - 1.96 * se_sensory
+        ci_high_sensory    = coef_sensory + 1.96 * se_sensory
+    
+        results.append({"reference_group": "motor", "comparison_group": "sensory" , "direction":"ecog->lfp", "state":state, "segment": segment,
+                        "frequency_band":frequency_band, "coefficient": coef_sensory, "z_score": z_score_sensory, 
+                        "pvalue": pval_sensory, "CI_lower": ci_low_sensory, "CI_upper": ci_high_sensory})
+        
+    except KeyError: # no sensory cortex recordings
+        results.append({"reference_group": "motor", "comparison_group": "sensory" , "direction":"ecog->lfp", "state":state, "segment": segment,
+                        "frequency_band":frequency_band, "coefficient": np.nan, "z_score": np.nan, 
+                        "pvalue":np.nan, "CI_lower": np.nan, "CI_upper": np.nan})
+        
+    try:
+        coef_parietal       = model_result.params[cor_parietal]
+        se_parietal         = model_result.bse[cor_parietal]
+        pval_parietal       = model_result.pvalues[cor_parietal]
+        z_score_parietal    = coef_parietal / se_parietal
+        ci_low_parietal     = coef_parietal - 1.96 * se_parietal
+        ci_high_parietal    = coef_parietal + 1.96 * se_parietal
+    
+        results.append({"reference_group": "motor", "comparison_group": "parietal" , "direction":"ecog->lfp", "state":state, "segment": segment,
+                        "frequency_band":frequency_band, "coefficient": coef_parietal, "z_score": z_score_parietal, 
+                        "pvalue": pval_parietal, "CI_lower": ci_low_parietal, "CI_upper": ci_high_parietal})
+        
+    except KeyError: # no parietal cortex recordings
+        results.append({"reference_group": "motor", "comparison_group": "parietal" , "direction":"ecog->lfp", "state":state, "segment": segment,
+                        "frequency_band":frequency_band, "coefficient": np.nan, "z_score": np.nan, 
+                        "pvalue":np.nan, "CI_lower": np.nan, "CI_upper": np.nan})
+        
+    try:
+        coef_prefrontal       = model_result.params[cor_prefrontal]
+        se_prefrontal         = model_result.bse[cor_prefrontal]
+        pval_prefrontal       = model_result.pvalues[cor_prefrontal]
+        z_score_prefrontal    = coef_prefrontal / se_prefrontal
+        ci_low_prefrontal     = coef_prefrontal - 1.96 * se_prefrontal
+        ci_high_prefrontal    = coef_prefrontal + 1.96 * se_prefrontal
+    
+        results.append({"reference_group": "motor", "comparison_group": "prefrontal" , "direction":"ecog->lfp", "state":state, "segment": segment,
+                        "frequency_band":frequency_band, "coefficient": coef_prefrontal, "z_score": z_score_prefrontal, 
+                        "pvalue": pval_prefrontal, "CI_lower": ci_low_prefrontal, "CI_upper": ci_high_prefrontal})
+        
+    except KeyError: # no prefrontal cortex recordings
+        results.append({"reference_group": "motor", "comparison_group": "prefrontal" , "direction":"ecog->lfp", "state":state, "segment": segment,
+                        "frequency_band":frequency_band, "coefficient": np.nan, "z_score": np.nan, 
+                        "pvalue":np.nan, "CI_lower": np.nan, "CI_upper": np.nan})
+    
+    return results
