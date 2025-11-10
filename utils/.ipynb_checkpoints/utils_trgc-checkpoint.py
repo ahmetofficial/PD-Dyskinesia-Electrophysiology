@@ -679,3 +679,191 @@ def compare_trgc_strength_across_segments_within_cortical_areas(dataset, state, 
                         "pvalue":np.nan, "CI_lower": np.nan, "CI_upper": np.nan})
     
     return results
+
+###################################################################################################################
+# NET TRGC ########################################################################################################
+###################################################################################################################
+
+def compute_net_gc(dataset):
+    
+    # split ECOG->LFP and LFP->ECOG
+    df_ecog = dataset[dataset['source_type'] == 'ECOG'].copy()
+    df_lfp  = dataset[dataset['source_type'] == 'LFP'].copy()
+
+    #  merge on patient, state, segment, and [source_channel, target_channel](reversed in two dataframes 
+    merged = pd.merge(df_ecog, df_lfp,
+                      left_on  = ['patient','state','segment','source_channel','target_channel'],
+                      right_on = ['patient','state','segment','target_channel','source_channel'],
+                      suffixes = ('_ecog','_lfp'))
+
+    gc_columns = ['gc_theta','gc_alpha','gc_beta_low','gc_beta_high','gc_gamma']
+
+    # calculate net_gc = ecog->lfp - lfp->ecog
+    for col in gc_columns:
+        merged[f'{col}'] = merged[f'{col}_ecog'] - merged[f'{col}_lfp']
+
+    # keep the relevant columns
+    merged["source_type"]       = merged["source_type_ecog"].copy()
+    merged["source_hemisphere"] = merged["source_hemisphere_ecog"].copy()
+    merged["source_channel"]    = merged["source_channel_ecog"].copy()
+    merged["target_type"]       = merged["target_type_ecog"].copy()
+    merged["target_hemisphere"] = merged["target_hemisphere_ecog"].copy()
+    merged["target_channel"]    = merged["target_channel_ecog"].copy()
+    result                      = merged[["patient","state","segment","source_type","source_hemisphere","source_channel",
+                                          "target_type","target_hemisphere","target_channel"] + [c for c in gc_columns]]
+
+    return result
+
+def compare_net_trgc_strength_between_directions(dataset, state, segment, frequency_band):
+
+    data                = dataset[(dataset.state==state) & (dataset.segment==segment)].copy()
+    data["source_type"] = pd.Categorical(data["source_type"], categories=["LFP", "ECOG"], ordered=False) # LFP as baseline brain area
+    model               = smf.mixedlm(f"gc_{frequency_band} ~ C(source_type)", data, groups=data["patient"], vc_formula={"channel": "0 + C(source_channel)"})
+    result              = model.fit()
+    
+    coef                = result.params["C(source_type)[T.ECOG]"]
+    se                  = result.bse["C(source_type)[T.ECOG]"]
+    pval                = result.pvalues["C(source_type)[T.ECOG]"]
+    
+    z_score             = coef / se
+    ci_low              = coef - 1.96 * se
+    ci_high             = coef + 1.96 * se
+    
+    result              = {"reference_group": "STN", "comparison_group": "CORTEX", "state":state, "segment":segment, "frequency_band":frequency_band,
+                           "coefficient": coef, "z_score": z_score, "pvalue": pval, "CI_lower": ci_low, "CI_upper": ci_high}
+    return pd.DataFrame([result])
+
+
+def compare_net_trgc_strength_between_directions_and_states(dataset, segment, frequency_band):
+
+    ###################################################################################################
+    # filter for the given segment ###################################################################
+    ###################################################################################################
+    
+    data                = dataset[dataset["segment"] == segment].copy()
+    data["source_type"] = pd.Categorical(data["source_type"], categories=["LFP", "ECOG"], ordered=False) # LFP as baseline brain area
+    results_list        = []
+    
+    ###################################################################################################
+    # MED-OFF vs MED-ON ###############################################################################
+    ###################################################################################################
+    
+    data_OFF_ON          = data[data["state"].isin(["MED-OFF", "MED-ON"])].copy()
+    data_OFF_ON["state"] = pd.Categorical(data_OFF_ON["state"], categories=["MED-OFF", "MED-ON"], ordered=False)
+    
+    model1               = smf.mixedlm(f"gc_{frequency_band} ~ C(state) * C(source_type)",
+                                       data_OFF_ON,
+                                       groups=data_OFF_ON["patient"], 
+                                       vc_formula={"channel": "0 + C(source_channel)"})
+    result1              = model1.fit()
+    coef1                = result1.params["C(state)[T.MED-ON]:C(source_type)[T.ECOG]"]
+    se1                  = result1.bse["C(state)[T.MED-ON]:C(source_type)[T.ECOG]"]
+    pval1                = result1.pvalues["C(state)[T.MED-ON]:C(source_type)[T.ECOG]"]
+    z_score1             = coef1 / se1
+    ci_low1              = coef1 - 1.96 * se1
+    ci_high1             = coef1 + 1.96 * se1
+    
+    result_OFF_ON        = {"reference_region": "STN", "comparison_region": "CORTEX",
+                            "reference_state": "MED-OFF", "comparison_state": "MED-ON",
+                            "segment": segment, "frequency_band": frequency_band,
+                            "coefficient": coef1, "z_score": z_score1, "pvalue": pval1,
+                            "CI_lower": ci_low1, "CI_upper": ci_high1}
+    
+    results_list.append(result_OFF_ON)
+    
+    ###################################################################################################
+    # MED-ON vs LID ###################################################################################
+    ###################################################################################################
+    
+    data_ON_LID          = data[data["state"].isin(["MED-ON", "LID"])].copy()
+    data_ON_LID["state"] = pd.Categorical(data_ON_LID["state"], categories=["MED-ON", "LID"], ordered=False)
+    model2               = smf.mixedlm(f"gc_{frequency_band} ~ C(state) * C(source_type)",
+                                       data_ON_LID,
+                                       groups=data_ON_LID["patient"],
+                                       vc_formula={"channel": "0 + C(source_channel)"})
+    result2              = model2.fit()
+    coef2                = result2.params["C(state)[T.LID]:C(source_type)[T.ECOG]"]
+    se2                  = result2.bse["C(state)[T.LID]:C(source_type)[T.ECOG]"]
+    pval2                = result2.pvalues["C(state)[T.LID]:C(source_type)[T.ECOG]"]
+    z_score2             = coef2 / se2
+    ci_low2              = coef2 - 1.96 * se2
+    ci_high2             = coef2 + 1.96 * se2
+    
+    result_ON_LID        = {"reference_region": "STN", "comparison_region": "CORTEX",
+                            "reference_state": "MED-ON", "comparison_state": "LID",
+                            "segment": segment, "frequency_band": frequency_band,
+                            "coefficient": coef2, "z_score": z_score2, "pvalue": pval2,
+                            "CI_lower": ci_low2, "CI_upper": ci_high2}
+    
+    results_list.append(result_ON_LID)
+    
+    return pd.DataFrame(results_list)
+
+def compare_net_trgc_strength_between_segments_within_state(dataset, state, frequency_band):
+    
+    results_list = []
+
+    ###################################################################################################
+    # filter dataset for the selected state ###########################################################
+    ###################################################################################################
+    data                = dataset[dataset["state"] == state].copy()
+    data["source_type"] = pd.Categorical(data["source_type"], categories=["LFP", "ECOG"], ordered=False)
+    
+    ###################################################################################################
+    # PRE_EVENT vs EVENT ##############################################################################
+    ###################################################################################################
+    data_pre_event            = data[data["segment"].isin(["pre_event", "event"])].copy()
+    data_pre_event["segment"] = pd.Categorical(data_pre_event["segment"], categories=["pre_event", "event"], ordered=False)
+
+    model1  = smf.mixedlm(f"gc_{frequency_band} ~ C(segment) * C(source_type)",
+                          data_pre_event, groups=data_pre_event["patient"],
+                          vc_formula={"channel": "0 + C(source_channel)"})
+    result1 = model1.fit()
+
+    coef1    = result1.params["C(segment)[T.event]:C(source_type)[T.ECOG]"]
+    se1      = result1.bse["C(segment)[T.event]:C(source_type)[T.ECOG]"]
+    pval1    = result1.pvalues["C(segment)[T.event]:C(source_type)[T.ECOG]"]
+    z_score1 = coef1 / se1
+    ci_low1  = coef1 - 1.96 * se1
+    ci_high1 = coef1 + 1.96 * se1
+
+    result_pre_event_event = {
+        "reference_region": "STN", "comparison_region": "CORTEX",
+        "reference_segment": "pre_event", "comparison_segment": "event",
+        "state": state, "frequency_band": frequency_band,
+        "coefficient": coef1, "z_score": z_score1, "pvalue": pval1,
+        "CI_lower": ci_low1, "CI_upper": ci_high1
+    }
+    results_list.append(result_pre_event_event)
+
+    ###################################################################################################
+    # EVENT vs POST_EVENT #############################################################################
+    ###################################################################################################
+    data_event_post = data[data["segment"].isin(["event", "post_event"])].copy()
+    data_event_post["segment"] = pd.Categorical(data_event_post["segment"], categories=["event", "post_event"], ordered=False)
+
+    model2  = smf.mixedlm(f"gc_{frequency_band} ~ C(segment) * C(source_type)",
+                          data_event_post, groups=data_event_post["patient"],
+                          vc_formula={"channel": "0 + C(source_channel)"})
+    result2 = model2.fit()
+
+    coef2    = result2.params["C(segment)[T.post_event]:C(source_type)[T.ECOG]"]
+    se2      = result2.bse["C(segment)[T.post_event]:C(source_type)[T.ECOG]"]
+    pval2    = result2.pvalues["C(segment)[T.post_event]:C(source_type)[T.ECOG]"]
+    z_score2 = coef2 / se2
+    ci_low2  = coef2 - 1.96 * se2
+    ci_high2 = coef2 + 1.96 * se2
+
+    result_event_post = {
+        "reference_region": "STN", "comparison_region": "CORTEX",
+        "reference_segment": "event", "comparison_segment": "post_event",
+        "state": state, "frequency_band": frequency_band,
+        "coefficient": coef2, "z_score": z_score2, "pvalue": pval2,
+        "CI_lower": ci_low2, "CI_upper": ci_high2
+    }
+    results_list.append(result_event_post)
+
+    ###################################################################################################
+    # Return results as DataFrame #####################################################################
+    ###################################################################################################
+    return pd.DataFrame(results_list)

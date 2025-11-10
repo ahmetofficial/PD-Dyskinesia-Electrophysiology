@@ -102,7 +102,7 @@ def extract_baseline_coherence_between_ECOG_LFP_channels():
                             row["LFP_channel"]     = c_LFP
                             row["coherence"]       = Cxy
     
-                            if(~all(row["coherence"])): #if coherence array is not completerly np.nan
+                            if(~all(row["coherence"])): #if coherence array is not completely np.nan
                                 baseline_ECOG_LFP_coherence.loc[len(baseline_ECOG_LFP_coherence)] = row
 
                         except:
