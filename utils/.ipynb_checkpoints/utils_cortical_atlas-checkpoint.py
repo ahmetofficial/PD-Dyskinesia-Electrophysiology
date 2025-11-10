@@ -99,6 +99,19 @@ def parcellate_ECoG_channels_to_cortical_areas(AAL3_object, AAL3_labels, MNI_ECo
         'Superior frontal gyrus, dorsolateral': 'Prefrontal cortex',
         'Inferior parietal gyrus, excluding supramarginal and angular gyri': 'Parietal cortex'
     }
+
+    gyrus_to_functional_cortex_mapping = {
+        'Precentral gyrus': 'Motor cortex',
+        'Rolandic operculum': 'Motor cortex',
+        'Supplementary motor area': 'Motor cortex',
+        'Postcentral gyrus': 'Sensory cortex',
+        'Middle frontal gyrus': 'Prefrontal cortex',
+        'Superior frontal gyrus, dorsolateral': 'Prefrontal cortex',
+        'Inferior frontal gyrus, opercular part': 'Prefrontal cortex',
+        'Inferior frontal gyrus, triangular part': 'Prefrontal cortex',
+        'Superior parietal gyrus': 'Parietal cortex',
+        'Inferior parietal gyrus, excluding supramarginal and angular gyri': 'Parietal cortex'
+    }
     
     # create the new column by mapping the values
     MNI_ECoG_channels['AAL3_cortex'] = MNI_ECoG_channels['AAL3_parcellation'].map(gyrus_to_functional_cortex_mapping)

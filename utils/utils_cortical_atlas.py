@@ -44,6 +44,11 @@ def map_ECOG_channels_on_cortical_surface(MNI_ECoG_channels, cortex_mesh):
     MNI_ECoG_channels["z_mapped"] = z_mapped
 
     return MNI_ECoG_channels
+
+#############################################################################################################
+#############################################################################################################
+#############################################################################################################
+
     
 def parcellate_ECoG_channels_to_cortical_areas(AAL3_object, AAL3_labels, MNI_ECoG_channels):
     
@@ -62,7 +67,7 @@ def parcellate_ECoG_channels_to_cortical_areas(AAL3_object, AAL3_labels, MNI_ECo
     # find the coordinates of the corresponding voxel of each ECoG channel
     voxel_coordinates = []
     for index, row in MNI_ECoG_channels.iterrows():
-        coordinates = [row.x, row.y, row.z]
+        coordinates = [np.abs(row.x), row.y, row.z]
         voxel_coordinates.append(np.round(np.linalg.inv(AAL3_affine_matrix).dot(np.append(coordinates, 1))[:3]).astype(int))
     
     # find the voxel ids of given voxel coordinates
@@ -93,18 +98,25 @@ def parcellate_ECoG_channels_to_cortical_areas(AAL3_object, AAL3_labels, MNI_ECo
     
     gyrus_to_functional_cortex_mapping = {
         'Precentral gyrus': 'Motor cortex',
+        'Supplementary motor area': 'Motor cortex',
         'Postcentral gyrus': 'Sensory cortex',
         'Middle frontal gyrus': 'Prefrontal cortex',
         'Superior parietal gyrus': 'Parietal cortex',
         'Superior frontal gyrus, dorsolateral': 'Prefrontal cortex',
         'Inferior parietal gyrus, excluding supramarginal and angular gyri': 'Parietal cortex'
     }
+
     
     # create the new column by mapping the values
     MNI_ECoG_channels['AAL3_cortex'] = MNI_ECoG_channels['AAL3_parcellation'].map(gyrus_to_functional_cortex_mapping)
     
     return MNI_ECoG_channels
 
+
+
+#############################################################################################################
+#############################################################################################################
+#############################################################################################################
 
 def flip_ECoG_channels_left_to_right_hemisphere(dataset):
     

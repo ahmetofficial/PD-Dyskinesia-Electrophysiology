@@ -3,30 +3,15 @@ import pyvista
 from matplotlib.colors import LinearSegmentedColormap, to_rgb
 import pandas as pd
 import numpy as np
+import sys
 
 import warnings
 warnings.filterwarnings("ignore")
 
-import utils_MER
-
-def get_gradient(mesh, position, color):
-
-    z       = mesh.points[:, 2]
-    z_norm  = (z - z.min()) / (z.max() - z.min())  # normalize 0→1
-    r, g, b = to_rgb(color) # Convert color to RGB
-
-    if position == "dorsal":
-        scalars = z_norm                      # bottom→top gradient
-        cmap = LinearSegmentedColormap.from_list("ventral", [(1,1,1), (r,g,b)])
-    elif position == "ventral":
-        scalars = 1 - z_norm                  # top→bottom gradient
-        cmap = LinearSegmentedColormap.from_list("dorsal", [(1,1,1), (r,g,b)])
-    else:  # "full"
-        scalars = np.zeros_like(z_norm)       # all zeros → same color
-        cmap = LinearSegmentedColormap.from_list("full", [(r,g,b), (r,g,b)])  # flat
-
-    return scalars, cmap
-
+# inserting the lib folder to the compiler
+sys.path.insert(0, './lib')
+sys.path.insert(0, './utils/')
+import utils_io
 
 
 def get_gradient_transparent(mesh, position, color, fade_power=1.75):
@@ -35,7 +20,7 @@ def get_gradient_transparent(mesh, position, color, fade_power=1.75):
     if not hasattr(mesh, "points"):
         raise ValueError("`mesh` must have a `.points` attribute (Nx3 array).")
 
-    valid_positions = {"dorsal", "ventral", "medial", "lateral", "full"}
+    valid_positions = {"dorsal", "ventral", "anterior", "posterior", "medial", "lateral", "full"}
     positions = [p.strip().lower() for p in position.split("+")]
     for p in positions:
         if p not in valid_positions:
@@ -43,6 +28,7 @@ def get_gradient_transparent(mesh, position, color, fade_power=1.75):
 
     # Extract coordinates
     x = mesh.points[:, 0]
+    y = mesh.points[:, 1]
     z = mesh.points[:, 2]
 
     # Normalize safely
@@ -53,6 +39,7 @@ def get_gradient_transparent(mesh, position, color, fade_power=1.75):
         return (arr - arr_min) / (arr_max - arr_min)
 
     x_norm = normalize(x)
+    y_norm = normalize(y)
     z_norm = normalize(z)
 
     # Start fully opaque
@@ -64,6 +51,10 @@ def get_gradient_transparent(mesh, position, color, fade_power=1.75):
             opacity *= z_norm ** fade_power
         elif p == "ventral":     # top → bottom
             opacity *= (1 - z_norm) ** fade_power
+        elif p == "anterior":    # left → right
+            opacity *= y_norm ** fade_power
+        elif p == "posterior":   # right → left
+            opacity *= (1 - y_norm) ** fade_power
         elif p == "lateral":     # left → right
             opacity *= x_norm ** fade_power
         elif p == "medial":      # right → left
@@ -85,7 +76,7 @@ def get_gradient_transparent(mesh, position, color, fade_power=1.75):
 ###############################################################################################################################################
 
 # load basal ganglia nuclei meshes
-plane           = "xz"
+plane           = "xy"
 
 
 # color codes for basal ganglia nuclei
@@ -97,9 +88,12 @@ colors["beta_low"]  = "#4ec1dfff"
 colors["beta_high"] = "#1a659eff"
 colors["gamma"]     = "#ff0a54ff"
 
+colors["beta_high"] = "lightgray"
+colors["gamma"]     = "lightgray"
+
 
 # Define bands and their gradient positions
-bands               = [("beta_low", "ventral+medial"), ("beta_high", "ventral+medial"),("gamma", "dorsal+lateral")]
+bands               = [("beta_low", "anterior"), ("beta_high", "full"),("gamma", "full")]
 camera_positions    = {"xy": (0.0, 0.0, 1.0), "yz": (-0.6, -0.6, 1.0), "xz": (0.0, -1.0, 0.0)}
 
 
@@ -108,23 +102,22 @@ plotter = pv.Plotter(shape=(1, 3), border=False)
 
 for i, (band, grad_position) in enumerate(bands):
     
-    STN_meshes     = utils_MER.load_STN_meshes()
-    STN_mesh       = STN_meshes["right"]["stn"]
-    STN_SM_mesh    = STN_meshes["right"]["stn_SM"]
+    
+    cortex_mesh  = utils_io.load_cortical_atlas_meshes()
+    cortex_right = cortex_mesh["right_hemisphere"]
     
     if(band!="gamma"):
-        color, opacity = get_gradient_transparent(STN_SM_mesh, position=grad_position, color=colors[band], fade_power=1)
+        color, opacity = get_gradient_transparent(cortex_right, position=grad_position, color=colors[band], fade_power=1.5)
     else:
-        color, opacity = get_gradient_transparent(STN_SM_mesh, position=grad_position, color=colors[band])
+        color, opacity = get_gradient_transparent(cortex_right, position=grad_position, color=colors[band])
     
     plotter.subplot(0, i)
     
     # Base STN and SM meshes (semi-transparent)
-    plotter.add_mesh(STN_mesh, color=colors["stn"], opacity=0.15)
-    plotter.add_mesh(STN_SM_mesh, color=colors["stn"], opacity=0.25)
+    plotter.add_mesh(cortex_right, color=colors["stn"], opacity=1)
     
     # Gradient overlay
-    plotter.add_mesh(STN_SM_mesh, color=color, opacity=opacity, show_scalar_bar=False)
+    plotter.add_mesh(cortex_right, color=color, opacity=opacity, show_scalar_bar=False)
 
     # Set camera for the chosen plane
     plotter.camera_position = camera_positions[plane]
